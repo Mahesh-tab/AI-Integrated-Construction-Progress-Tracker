@@ -2,7 +2,7 @@ import streamlit as st
 from database import get_user, init_db
 from utils import verify_password
 import admin_page
-import engineer_page
+import engineer_page_new as engineer_page
 
 # Page configuration
 st.set_page_config(

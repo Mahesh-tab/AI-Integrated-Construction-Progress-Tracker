@@ -4,7 +4,7 @@ Supports multi-floor data entry, work type tracking, and AI-powered verification
 """
 
 import streamlit as st
-import datetime
+from datetime import datetime
 import pickle
 import re
 import csv
@@ -142,73 +142,120 @@ def get_gemini_analysis(description, image_data_list, category, floor_data):
         
         # Build comprehensive prompt with all floor data
         floor_summary = "\n\n**FLOOR-WISE PROGRESS DETAILS:**\n"
-        for floor_info in floor_data:
-            floor_summary += f"\n**{floor_info['floor_name']}:**\n"
-            floor_summary += f"- Work Phase: {floor_info['work_phase']}\n"
-            floor_summary += f"- Overall Floor Progress: {floor_info['floor_progress']}%\n"
-            floor_summary += "- Work Types:\n"
-            for work_type, details in floor_info['work_types'].items():
-                floor_summary += f"  • {work_type}: {details['status']} ({details['progress']}%)\n"
+        total_work_types = 0
+        total_floors = len(floor_data)
         
-        prompt = f"""You are a certified construction site inspector conducting a professional analysis.
+        for idx, floor_info in enumerate(floor_data, 1):
+            floor_summary += f"\n**Floor {idx}/{total_floors}: {floor_info['floor_name']}**\n"
+            floor_summary += f"  📊 Work Phase: {floor_info['work_phase']}\n"
+            floor_summary += f"  📈 Overall Floor Progress: {floor_info['floor_progress']}%\n"
+            floor_summary += f"  🔧 Work Types Tracked: {len(floor_info['work_types'])}\n"
+            floor_summary += "  📋 Detailed Work Breakdown:\n"
+            
+            for work_type, details in floor_info['work_types'].items():
+                total_work_types += 1
+                floor_summary += f"    • {work_type}:\n"
+                floor_summary += f"      - Status: {details['status']}\n"
+                floor_summary += f"      - Progress: {details['progress']}%\n"
+        
+        # Add statistical summary
+        floor_summary += f"\n**📊 SUMMARY STATISTICS:**\n"
+        floor_summary += f"  - Total Floors: {total_floors}\n"
+        floor_summary += f"  - Total Work Types Tracked: {total_work_types}\n"
+        avg_floor_progress = sum(f['floor_progress'] for f in floor_data) / total_floors if total_floors > 0 else 0
+        floor_summary += f"  - Average Floor Progress: {avg_floor_progress:.1f}%\n"
+        
+        prompt = f"""You are a certified construction site inspector conducting a professional analysis with deep floor-wise tracking.
 
 **PROJECT CONTEXT:**
 - Work Category: {category}
-- Number of Images: {len(images)}
-- Engineer's Description: {description}
+- Number of Images Submitted: {len(images)}
+- Total Floors Tracked: {total_floors}
+- Total Work Types: {total_work_types}
+- Engineer's Overall Description: {description}
 
 {floor_summary}
 
 **ANALYSIS INSTRUCTIONS:**
-Examine all {len(images)} image(s) and cross-reference with the provided floor-wise progress data.
+Examine all {len(images)} image(s) and cross-reference with the comprehensive floor-wise progress data provided above.
+
+**CRITICAL FOCUS AREAS:**
+1. **Floor Identification**: Try to identify which floor(s) each image represents based on visual cues
+2. **Work Type Verification**: Verify if the claimed work types are visible in the images
+3. **Progress Accuracy**: Assess if the claimed progress percentages align with visual evidence
+4. **Cross-Floor Consistency**: Check if progress is consistent across floors
+5. **Phase Alignment**: Verify if work phases (Not Started/In Progress/Completed) match visual reality
 
 **REQUIRED REPORT STRUCTURE:**
 
 **1. VERIFICATION STATUS**
-Select ONE based on visual evidence:
-- ✅ VERIFIED: Visual evidence fully confirms reported work
-- ⚠️ PARTIALLY VERIFIED: Some aspects confirmed, discrepancies noted
-- ❌ NOT VERIFIED: Visual evidence contradicts description
-- ℹ️ INSUFFICIENT DATA: Image quality/coverage inadequate
+Select ONE based on comprehensive visual evidence:
+- ✅ VERIFIED: Visual evidence fully confirms reported work across all floors
+- ⚠️ PARTIALLY VERIFIED: Some aspects confirmed, but discrepancies noted on specific floors
+- ❌ NOT VERIFIED: Visual evidence contradicts description or floor data
+- ℹ️ INSUFFICIENT DATA: Image quality/coverage inadequate for {total_floors} floors
 
 **2. VISUAL EVIDENCE ANALYSIS**
 - Document what is clearly visible in each image
-- Identify materials, equipment, and completed work
-- Note image quality and coverage adequacy
-- Compare visual findings with engineer's floor-wise description
+- Identify which floor(s) each image likely represents (if determinable)
+- List materials, equipment, and completed work visible
+- Note image quality and coverage adequacy for {total_floors} floors
+- Compare visual findings with engineer's floor-wise breakdown
 
 **3. TECHNICAL QUALITY ASSESSMENT**
 - **Workmanship Rating:** [Excellent/Good/Adequate/Poor/Cannot Assess]
-- **Justification:** Specific observations
-- **Materials & Specifications:** Visible materials and condition
-- **Defects/Issues:** Any visible problems
-- **Industry Standards Compliance:** For {category}
+- **Justification:** Specific observations from images
+- **Materials & Specifications:** Visible materials and their condition
+- **Defects/Issues:** Any visible problems or quality concerns
+- **Industry Standards Compliance:** Compliance with standards for {category}
+- **Floor-wise Quality Variations:** Note any quality differences between floors
 
 **4. SAFETY & COMPLIANCE**
-- **PPE Status:** Visible safety gear
-- **Site Safety Measures:** Barriers, signage, fall protection
-- **Hazard Identification:** List visible hazards
-- **Housekeeping:** Site cleanliness and organization
+- **PPE Status:** Visible safety gear and compliance
+- **Site Safety Measures:** Barriers, signage, fall protection systems
+- **Hazard Identification:** List all visible hazards
+- **Housekeeping:** Site cleanliness and organization by floor
+- **Access Safety:** Scaffolding, ladders, and floor access safety
 
-**5. FLOOR-WISE VERIFICATION**
-For each floor mentioned, verify:
-- Does visual evidence support the claimed progress percentage?
-- Are the listed work types actually visible in the images?
-- Any discrepancies between claimed and observed progress?
+**5. DETAILED FLOOR-WISE VERIFICATION**
+For EACH floor mentioned in the data, provide:
+- **Visual Evidence Match**: Does any image show this floor? (Yes/No/Uncertain)
+- **Progress Verification**: Does claimed {floor_info['floor_progress']}% seem accurate?
+- **Work Type Confirmation**: Which claimed work types are actually visible?
+- **Phase Accuracy**: Is the work phase ({floor_info['work_phase']}) correct based on images?
+- **Discrepancies**: Any differences between claimed and observed status?
+- **Recommendations**: Specific actions needed for this floor
 
-**6. RECOMMENDATIONS**
-- **Immediate Actions Required**
-- **Quality Improvements**
-- **Additional Documentation Needed**
-- **Follow-up Inspections**
+**6. WORK TYPE ANALYSIS**
+For each work type category:
+- Verify presence and progress across floors
+- Identify any work types not visible in images but claimed
+- Note quality and completion status where visible
+- Highlight any concerning work types
 
-**7. PROGRESS ASSESSMENT**
-- **Overall Estimated Completion:** [0-100]%
-- **Basis for Estimate:** Explain reasoning
-- **Work Remaining:** What needs to be completed
-- **Timeline Assessment:** Is progress on track?
+**7. RECOMMENDATIONS**
+- **Immediate Actions Required**: By floor and work type
+- **Quality Improvements**: Specific recommendations
+- **Additional Documentation Needed**: Missing photos or data
+- **Follow-up Inspections**: Which floors/work types need re-inspection
+- **Priority Items**: Most critical issues to address
 
-Provide objective, evidence-based analysis using precise construction terminology."""
+**8. PROGRESS ASSESSMENT**
+- **Overall Site Completion:** [0-100]%
+- **Floor-by-Floor Assessment**: Brief status of each floor
+- **Most Advanced Floor**: Which floor is furthest along?
+- **Most Delayed Floor**: Which floor needs attention?
+- **Work Remaining**: Detailed breakdown of pending work
+- **Timeline Assessment**: Is overall progress on track?
+- **Critical Path Items**: Work types blocking other progress
+
+**9. DATA QUALITY & COMPLETENESS**
+- **Image Coverage**: Are {len(images)} images sufficient for {total_floors} floors?
+- **Missing Documentation**: What additional photos are needed?
+- **Data Consistency**: Is the floor-wise data internally consistent?
+- **Confidence Level**: High/Medium/Low confidence in this assessment
+
+Provide objective, evidence-based analysis using precise construction terminology. Be specific about which floors and work types you can/cannot verify from the images."""
 
         # Generate content
         content = [prompt] + images
@@ -583,7 +630,7 @@ def save_to_database(pending):
     """Save the analyzed progress to database"""
     
     user_id = st.session_state.user_id
-    date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Prepare work types data for all floors
     all_work_types = {}
@@ -615,7 +662,6 @@ def save_to_database(pending):
         )
         
         st.success("✅ Progress update saved successfully!")
-        st.balloons()
         
         # Clear session state
         st.session_state.pending_analysis = None
@@ -857,7 +903,7 @@ def generate_pdf_report(entry, site_details, num_images):
     # Footer
     pdf.ln(5)
     pdf.set_font("Arial", 'I', 8)
-    pdf.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
+    pdf.cell(0, 5, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", ln=True, align='C')
     
     # Output
     pdf_output = pdf.output(dest='S').encode('latin-1')
@@ -873,7 +919,7 @@ def generate_pdf_report(entry, site_details, num_images):
 # ANALYTICS TAB
 # ===========================
 
-def render_analytics(site_id):
+def render_analytics(site_id, site_details):
     """Display analytics and visualizations"""
     
     st.header("📈 Analytics & Visualizations")
@@ -1334,6 +1380,504 @@ def render_analytics(site_id):
                 st.info("No data available for the selected floors.")
     else:
         st.info("No floor-wise work type data available yet. Add progress updates with work type details to see this analysis.")
+    
+    # Monthly Report Download Section (OUTSIDE the conditional block)
+    st.markdown("---")
+    st.subheader("📥 Monthly Report Download")
+    
+    st.info("💡 Generate comprehensive monthly progress reports with charts, floor data, work types, and AI analysis summaries.")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        report_month = st.selectbox(
+            "Select Month",
+            ["January", "February", "March", "April", "May", "June", 
+             "July", "August", "September", "October", "November", "December"]
+        )
+    
+    with col2:
+        report_year = st.selectbox(
+            "Select Year",
+            [2025, 2024, 2023, 2022]
+        )
+    
+    with col3:
+        st.markdown("")
+        st.markdown("")
+        if st.button("📄 Generate Monthly Report", type="primary", use_container_width=True):
+            generate_monthly_report(site_id, site_details, report_month, report_year, 
+                                   progress_entries, selected_floors if 'selected_floors' in locals() else [])
+
+def generate_monthly_report(site_id, site_details, month, year, progress_entries, selected_floors):
+    """Generate comprehensive monthly PDF report"""
+    
+    import calendar
+    from datetime import datetime
+    
+    # Filter entries for the selected month
+    month_num = list(calendar.month_name).index(month)
+    filtered_entries = []
+    
+    for entry in progress_entries:
+        entry_date = datetime.strptime(entry[1][:10], "%Y-%m-%d")
+        if entry_date.month == month_num and entry_date.year == year:
+            filtered_entries.append(entry)
+    
+    if not filtered_entries:
+        st.warning(f"⚠️ No progress updates found for {month} {year}")
+        return
+    
+    with st.spinner(f"📊 Generating comprehensive report for {month} {year}..."):
+        # Create PDF
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        
+        # ===== COVER PAGE =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 24)
+        pdf.ln(30)
+        pdf.cell(0, 15, "CONSTRUCTION PROGRESS REPORT", ln=True, align='C')
+        
+        pdf.set_font("Arial", 'B', 18)
+        pdf.cell(0, 12, f"{month} {year}", ln=True, align='C')
+        pdf.ln(20)
+        
+        # Project Details
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, "PROJECT INFORMATION", ln=True, align='C')
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", '', 11)
+        project_info = [
+            ("Site Name:", site_details[1]),
+            ("Location:", site_details[2]),
+            ("Total Floors:", str(site_details[7] if len(site_details) > 7 else "N/A")),
+            ("Basements:", str(site_details[6] if len(site_details) > 6 else "0")),
+            ("Report Period:", f"{month} {year}"),
+            ("Total Updates:", str(len(filtered_entries))),
+            ("Generated On:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        ]
+        
+        for label, value in project_info:
+            pdf.set_font("Arial", 'B', 10)
+            pdf.cell(50, 7, label, 0, 0)
+            pdf.set_font("Arial", '', 10)
+            pdf.multi_cell(0, 7, str(value))
+        
+        # ===== EXECUTIVE SUMMARY =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "EXECUTIVE SUMMARY", ln=True)
+        pdf.ln(5)
+        
+        # Calculate summary statistics
+        total_updates = len(filtered_entries)
+        verified_count = sum(1 for e in filtered_entries if e[7] == "Verified")
+        partially_verified = sum(1 for e in filtered_entries if e[7] == "Partially Verified")
+        not_verified = sum(1 for e in filtered_entries if e[7] == "Not Verified")
+        
+        avg_progress = sum(e[8] for e in filtered_entries) / total_updates if total_updates > 0 else 0
+        latest_progress = filtered_entries[0][8] if filtered_entries else 0
+        
+        categories_used = len(set(e[3] for e in filtered_entries))
+        
+        pdf.set_font("Arial", '', 10)
+        summary_text = f"""
+Monthly Overview:
+- Total Progress Updates: {total_updates}
+- Average Progress: {avg_progress:.1f}%
+- Latest Progress: {latest_progress}%
+- Work Categories Covered: {categories_used}
+
+Verification Status:
+- Verified: {verified_count} ({verified_count/total_updates*100:.1f}%)
+- Partially Verified: {partially_verified} ({partially_verified/total_updates*100:.1f}%)
+- Not Verified: {not_verified} ({not_verified/total_updates*100:.1f}%)
+
+This report provides a comprehensive overview of construction progress for {month} {year}, 
+including detailed floor-wise analysis, work type breakdowns, and AI-verified assessments.
+"""
+        pdf.multi_cell(0, 5, summary_text.strip())
+        
+        # ===== PROGRESS TIMELINE =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "PROGRESS TIMELINE", ln=True)
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(40, 7, "Date", 1, 0, 'C')
+        pdf.cell(60, 7, "Category", 1, 0, 'C')
+        pdf.cell(30, 7, "Progress %", 1, 0, 'C')
+        pdf.cell(50, 7, "Verification", 1, 0, 'C')
+        pdf.ln()
+        
+        pdf.set_font("Arial", '', 9)
+        for entry in filtered_entries:
+            entry_id, date, username, category, description, image, ai_report, verification_status, progress_pct = entry
+            
+            pdf.cell(40, 6, date[:10], 1, 0)
+            pdf.cell(60, 6, category[:25], 1, 0)
+            pdf.cell(30, 6, f"{progress_pct}%", 1, 0, 'C')
+            pdf.cell(50, 6, verification_status[:20], 1, 0)
+            pdf.ln()
+        
+        # ===== CATEGORY BREAKDOWN =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "CATEGORY BREAKDOWN", ln=True)
+        pdf.ln(5)
+        
+        category_stats = {}
+        for entry in filtered_entries:
+            cat = entry[3]
+            if cat not in category_stats:
+                category_stats[cat] = {'count': 0, 'total_progress': 0}
+            category_stats[cat]['count'] += 1
+            category_stats[cat]['total_progress'] += entry[8]
+        
+        pdf.set_font("Arial", 'B', 10)
+        pdf.cell(80, 7, "Work Category", 1, 0, 'C')
+        pdf.cell(40, 7, "Updates", 1, 0, 'C')
+        pdf.cell(50, 7, "Avg Progress", 1, 0, 'C')
+        pdf.ln()
+        
+        pdf.set_font("Arial", '', 9)
+        for cat, stats in sorted(category_stats.items()):
+            avg = stats['total_progress'] / stats['count']
+            pdf.cell(80, 6, cat, 1, 0)
+            pdf.cell(40, 6, str(stats['count']), 1, 0, 'C')
+            pdf.cell(50, 6, f"{avg:.1f}%", 1, 0, 'C')
+            pdf.ln()
+        
+        # ===== FLOOR-WISE ANALYSIS =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "FLOOR-WISE ANALYSIS", ln=True)
+        pdf.ln(5)
+        
+        floor_data = get_floor_wise_progress(site_id)
+        
+        if floor_data:
+            # Filter by selected floors if applicable
+            if selected_floors:
+                floor_data = [f for f in floor_data if f[0] in selected_floors]
+            
+            pdf.set_font("Arial", '', 10)
+            pdf.multi_cell(0, 5, f"Tracking progress across {len(floor_data)} floor(s) with detailed work type analysis.")
+            pdf.ln(3)
+            
+            pdf.set_font("Arial", 'B', 10)
+            pdf.cell(50, 7, "Floor", 1, 0, 'C')
+            pdf.cell(30, 7, "Updates", 1, 0, 'C')
+            pdf.cell(40, 7, "Avg Progress", 1, 0, 'C')
+            pdf.cell(50, 7, "Work Types", 1, 0, 'C')
+            pdf.ln()
+            
+            pdf.set_font("Arial", '', 9)
+            for floor_name, updates, avg_prog, work_types in floor_data:
+                pdf.cell(50, 6, floor_name[:20], 1, 0)
+                pdf.cell(30, 6, str(updates), 1, 0, 'C')
+                pdf.cell(40, 6, f"{avg_prog:.1f}%", 1, 0, 'C')
+                pdf.cell(50, 6, str(work_types), 1, 0, 'C')
+                pdf.ln()
+        
+        # ===== WORK TYPE BREAKDOWN =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "WORK TYPE BREAKDOWN", ln=True)
+        pdf.ln(5)
+        
+        work_type_data = get_work_type_breakdown(site_id)
+        
+        if work_type_data:
+            pdf.set_font("Arial", '', 10)
+            pdf.multi_cell(0, 5, "Comprehensive tracking of all work types across the construction site.")
+            pdf.ln(3)
+            
+            pdf.set_font("Arial", 'B', 9)
+            pdf.cell(50, 7, "Work Type", 1, 0, 'C')
+            pdf.cell(20, 7, "Total", 1, 0, 'C')
+            pdf.cell(25, 7, "Complete", 1, 0, 'C')
+            pdf.cell(30, 7, "In Progress", 1, 0, 'C')
+            pdf.cell(35, 7, "Avg Progress", 1, 0, 'C')
+            pdf.ln()
+            
+            pdf.set_font("Arial", '', 8)
+            for work_name, total, completed, in_prog, avg_prog in work_type_data:
+                pdf.cell(50, 6, work_name[:20], 1, 0)
+                pdf.cell(20, 6, str(total), 1, 0, 'C')
+                pdf.cell(25, 6, str(completed), 1, 0, 'C')
+                pdf.cell(30, 6, str(in_prog), 1, 0, 'C')
+                pdf.cell(35, 6, f"{avg_prog:.1f}%", 1, 0, 'C')
+                pdf.ln()
+        
+        # ===== AI ANALYSIS SUMMARY =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "AI VERIFICATION SUMMARY", ln=True)
+        pdf.ln(5)
+        
+        pdf.set_font("Arial", '', 10)
+        pdf.multi_cell(0, 5, f"AI-powered analysis conducted on {total_updates} progress updates during {month} {year}.")
+        pdf.ln(3)
+        
+        # Extract key insights from AI reports - IMPROVED
+        verified_insights = []
+        issues_found = []
+        recommendations = []
+        
+        for entry in filtered_entries:  # Process ALL entries, not just top 5
+            ai_report = entry[6]
+            if ai_report and len(ai_report) > 100:
+                # Extract verification status section
+                if "VERIFIED" in ai_report:
+                    verified_insights.append(f"- {entry[1][:10]}: {entry[3]} - {entry[7]}")
+                
+                # Extract full recommendations section
+                if "RECOMMENDATIONS" in ai_report.upper():
+                    # Find the recommendations section
+                    parts = ai_report.upper().split("RECOMMENDATIONS")
+                    if len(parts) > 1:
+                        # Get the section after RECOMMENDATIONS
+                        rec_start = ai_report.upper().find("RECOMMENDATIONS")
+                        remaining = ai_report[rec_start:]
+                        
+                        # Find the next major section (or end of report)
+                        next_sections = ["PROGRESS ASSESSMENT", "DATA QUALITY", "**8.", "**9.", "\n\n**"]
+                        rec_end = len(remaining)
+                        
+                        for section in next_sections:
+                            pos = remaining.find(section)
+                            if pos > 0 and pos < rec_end:
+                                rec_end = pos
+                        
+                        rec_section = remaining[:rec_end].strip()
+                        
+                        # Clean up the section
+                        if rec_section:
+                            # Remove the header
+                            rec_lines = rec_section.split('\n')
+                            clean_lines = [line.strip() for line in rec_lines[1:] if line.strip() and not line.strip().startswith('**7.')]
+                            
+                            if clean_lines:
+                                rec_text = '\n'.join(clean_lines[:15])  # First 15 lines
+                                recommendations.append({
+                                    'date': entry[1][:10],
+                                    'category': entry[3],
+                                    'text': rec_text
+                                })
+        
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 7, "Verification Results:", ln=True)
+        pdf.set_font("Arial", '', 9)
+        for insight in verified_insights[:10]:
+            pdf.multi_cell(0, 5, insight)
+        
+        if not verified_insights:
+            pdf.multi_cell(0, 5, "No AI verification insights available for this period.")
+        
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 11)
+        pdf.cell(0, 7, "Key Recommendations from AI Analysis:", ln=True)
+        pdf.set_font("Arial", '', 9)
+        
+        if recommendations:
+            for idx, rec in enumerate(recommendations[:5], 1):  # Show top 5 in PDF
+                pdf.set_font("Arial", 'B', 9)
+                pdf.multi_cell(0, 5, f"{idx}. {rec['date']} - {rec['category']}:")
+                pdf.set_font("Arial", '', 8)
+                # Clean and encode text for PDF
+                clean_text = rec['text'].encode('latin-1', 'replace').decode('latin-1')
+                pdf.multi_cell(0, 4, clean_text)
+                pdf.ln(3)
+            
+            if len(recommendations) > 5:
+                pdf.set_font("Arial", 'I', 8)
+                pdf.multi_cell(0, 5, f"Note: Showing 5 of {len(recommendations)} recommendations. Download CSV for complete list.")
+        else:
+            pdf.multi_cell(0, 5, "Review individual AI reports for detailed recommendations.")
+        
+        # ===== DETAILED UPDATES =====
+        pdf.add_page()
+        pdf.set_font("Arial", 'B', 16)
+        pdf.cell(0, 10, "DETAILED PROGRESS UPDATES", ln=True)
+        pdf.ln(5)
+        
+        for idx, entry in enumerate(filtered_entries[:10], 1):  # Limit to 10 entries
+            entry_id, date, username, category, description, image, ai_report, verification_status, progress_pct = entry
+            
+            pdf.set_font("Arial", 'B', 11)
+            pdf.cell(0, 7, f"Update #{idx} - {date[:10]}", ln=True)
+            
+            pdf.set_font("Arial", '', 9)
+            pdf.multi_cell(0, 5, f"Category: {category} | Engineer: {username} | Progress: {progress_pct}% | Status: {verification_status}")
+            
+            pdf.set_font("Arial", 'I', 9)
+            clean_desc = description[:300].encode('latin-1', 'replace').decode('latin-1')
+            pdf.multi_cell(0, 5, f"Description: {clean_desc}...")
+            pdf.ln(3)
+            
+            if idx < len(filtered_entries):
+                pdf.ln(2)
+        
+        if len(filtered_entries) > 10:
+            pdf.ln(5)
+            pdf.set_font("Arial", 'I', 9)
+            pdf.multi_cell(0, 5, f"Note: Showing 10 of {len(filtered_entries)} total updates. Access the system for complete details.")
+        
+        # ===== FOOTER ON ALL PAGES =====
+        pdf.set_font("Arial", 'I', 8)
+        
+        # Generate PDF
+        pdf_output = pdf.output(dest='S').encode('latin-1')
+        
+        # Generate CSV data
+        csv_data = generate_monthly_csv(filtered_entries, month, year, site_details, 
+                                       floor_data if floor_data else [], 
+                                       work_type_data if work_type_data else [],
+                                       recommendations)
+        
+        # Download buttons
+        st.success(f"✅ Report generated successfully for {month} {year}!")
+        
+        col_dl1, col_dl2 = st.columns(2)
+        
+        with col_dl1:
+            st.download_button(
+                label=f"📥 Download PDF Report",
+                data=pdf_output,
+                file_name=f"Construction_Report_{month}_{year}_{site_details[1].replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+        
+        with col_dl2:
+            st.download_button(
+                label=f"📊 Download CSV Data",
+                data=csv_data,
+                file_name=f"Construction_Data_{month}_{year}_{site_details[1].replace(' ', '_')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        
+        # Summary metrics
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Updates", total_updates)
+        with col2:
+            st.metric("Avg Progress", f"{avg_progress:.1f}%")
+        with col3:
+            st.metric("Verified", f"{verified_count}/{total_updates}")
+        with col4:
+            st.metric("Categories", categories_used)
+
+def generate_monthly_csv(filtered_entries, month, year, site_details, floor_data, work_type_data, recommendations):
+    """Generate CSV file with monthly report data"""
+    
+    output = StringIO()
+    writer = csv.writer(output)
+    
+    # Header
+    writer.writerow([f"Construction Progress Report - {month} {year}"])
+    writer.writerow([f"Site: {site_details[1]}, Location: {site_details[2]}"])
+    writer.writerow([])
+    
+    # Summary Section
+    writer.writerow(["SUMMARY STATISTICS"])
+    writer.writerow(["Metric", "Value"])
+    
+    total_updates = len(filtered_entries)
+    verified_count = sum(1 for e in filtered_entries if e[7] == "Verified")
+    partially_verified = sum(1 for e in filtered_entries if e[7] == "Partially Verified")
+    not_verified = sum(1 for e in filtered_entries if e[7] == "Not Verified")
+    avg_progress = sum(e[8] for e in filtered_entries) / total_updates if total_updates > 0 else 0
+    
+    writer.writerow(["Total Updates", total_updates])
+    writer.writerow(["Average Progress", f"{avg_progress:.1f}%"])
+    writer.writerow(["Verified Updates", verified_count])
+    writer.writerow(["Partially Verified", partially_verified])
+    writer.writerow(["Not Verified", not_verified])
+    writer.writerow([])
+    
+    # Progress Timeline
+    writer.writerow(["PROGRESS TIMELINE"])
+    writer.writerow(["Date", "Engineer", "Category", "Description", "Progress %", "Verification Status"])
+    
+    for entry in filtered_entries:
+        entry_id, date, username, category, description, image, ai_report, verification_status, progress_pct = entry
+        # Clean description for CSV
+        clean_desc = description.replace('\n', ' ').replace('\r', ' ')[:200]
+        writer.writerow([date[:10], username, category, clean_desc, f"{progress_pct}%", verification_status])
+    
+    writer.writerow([])
+    
+    # Category Breakdown
+    writer.writerow(["CATEGORY BREAKDOWN"])
+    writer.writerow(["Category", "Number of Updates", "Average Progress"])
+    
+    category_stats = {}
+    for entry in filtered_entries:
+        cat = entry[3]
+        if cat not in category_stats:
+            category_stats[cat] = {'count': 0, 'total_progress': 0}
+        category_stats[cat]['count'] += 1
+        category_stats[cat]['total_progress'] += entry[8]
+    
+    for cat, stats in sorted(category_stats.items()):
+        avg = stats['total_progress'] / stats['count']
+        writer.writerow([cat, stats['count'], f"{avg:.1f}%"])
+    
+    writer.writerow([])
+    
+    # Floor-wise Analysis
+    if floor_data:
+        writer.writerow(["FLOOR-WISE ANALYSIS"])
+        writer.writerow(["Floor", "Number of Updates", "Average Progress", "Work Types Tracked"])
+        
+        for floor_name, updates, avg_prog, work_types in floor_data:
+            writer.writerow([floor_name, updates, f"{avg_prog:.1f}%", work_types])
+        
+        writer.writerow([])
+    
+    # Work Type Breakdown
+    if work_type_data:
+        writer.writerow(["WORK TYPE BREAKDOWN"])
+        writer.writerow(["Work Type", "Total Instances", "Completed", "In Progress", "Average Progress"])
+        
+        for work_name, total, completed, in_prog, avg_prog in work_type_data:
+            writer.writerow([work_name, total, completed, in_prog, f"{avg_prog:.1f}%"])
+        
+        writer.writerow([])
+    
+    # AI Recommendations - FULL CONTENT
+    if recommendations:
+        writer.writerow(["AI ANALYSIS - KEY RECOMMENDATIONS"])
+        writer.writerow(["Date", "Category", "Recommendations"])
+        
+        for rec in recommendations:
+            # Clean recommendations text for CSV
+            clean_text = rec['text'].replace('\n', ' | ').replace('\r', '')
+            writer.writerow([rec['date'], rec['category'], clean_text])
+        
+        writer.writerow([])
+    
+    # Detailed AI Reports Section
+    writer.writerow(["DETAILED AI VERIFICATION REPORTS"])
+    writer.writerow(["Date", "Category", "Verification Status", "AI Analysis Summary"])
+    
+    for entry in filtered_entries:
+        entry_id, date, username, category, description, image, ai_report, verification_status, progress_pct = entry
+        
+        # Extract first 500 characters of AI report
+        ai_summary = ai_report[:500].replace('\n', ' | ').replace('\r', '') if ai_report else "No AI report"
+        writer.writerow([date[:10], category, verification_status, ai_summary])
+    
+    writer.writerow([])
+    writer.writerow(["Report Generated:", datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+    
+    return output.getvalue()
 
 # ===========================
 # MAIN FUNCTION
@@ -1374,7 +1918,7 @@ def show():
         render_progress_history(site_id, site_details)
     
     with tab3:
-        render_analytics(site_id)
+        render_analytics(site_id, site_details)
 
 if __name__ == "__main__":
     show()

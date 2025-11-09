@@ -1011,7 +1011,7 @@ def render_analytics(site_id):
     
     # Work type analysis
     st.markdown("---")
-    st.subheader("🔧 Work Type Analysis")
+    st.subheader("🔧 Work Type Analysis -check")
     
     work_type_data = get_work_type_breakdown(site_id)
     
