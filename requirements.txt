@@ -1,0 +1,11 @@
+streamlit
+SQLAlchemy
+pandas
+google-generativeai
+streamlit-option-menu
+bcrypt
+python-dotenv
+fpdf
+Pillow
+plotly
+matplotlib
