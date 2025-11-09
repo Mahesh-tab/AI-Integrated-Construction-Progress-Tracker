@@ -178,10 +178,10 @@ def show():
                     floor_data = get_floor_wise_progress(site_id)
                     if floor_data:
                         st.markdown("**🏢 Floor-wise Progress Overview:**")
-                        floor_df = pd.DataFrame(floor_data, columns=['Floor', 'Updates', 'Avg Progress %', 'Latest Phase', 'Work Types Count'])
+                        floor_df = pd.DataFrame(floor_data, columns=['Floor', 'Updates', 'Avg Progress %', 'Work Types Count'])
                         floor_df['Avg Progress %'] = floor_df['Avg Progress %'].round(1).astype(str) + '%'
                         st.dataframe(
-                            floor_df[['Floor', 'Avg Progress %', 'Latest Phase']],
+                            floor_df[['Floor', 'Avg Progress %', 'Work Types Count']],
                             use_container_width=True,
                             hide_index=True,
                             height=150

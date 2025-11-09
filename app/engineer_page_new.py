@@ -28,7 +28,10 @@ from database import (
     get_verification_breakdown,
     get_monthly_progress, 
     get_floor_wise_progress, 
-    get_work_type_breakdown
+    get_work_type_breakdown,
+    get_floor_wise_work_type_breakdown,
+    get_work_type_floor_matrix,
+    get_floor_completion_stats
 )
 
 load_dotenv()
@@ -881,6 +884,47 @@ def render_analytics(site_id):
         st.info("📭 No progress data available. Add updates to see analytics!")
         return
     
+    # Floor Filter Section (Global for all analytics)
+    st.markdown("### 🔍 Filter Options")
+    
+    # Get all available floors from the database
+    floor_work_data = get_floor_wise_work_type_breakdown(site_id)
+    
+    if floor_work_data:
+        all_floors = sorted(floor_work_data.keys())
+        
+        col_filter1, col_filter2 = st.columns([3, 1])
+        
+        with col_filter1:
+            selected_floors = st.multiselect(
+                "Select Floors to Display",
+                all_floors,
+                default=all_floors,
+                key="analytics_floor_filter",
+                help="Choose specific floors to analyze. This filter applies to all floor-related visualizations below."
+            )
+        
+        with col_filter2:
+            st.markdown("")  # Spacing
+            st.markdown("")  # Spacing
+            if st.button("🔄 Reset Filter", use_container_width=True):
+                selected_floors = all_floors
+                st.rerun()
+        
+        if not selected_floors:
+            st.warning("⚠️ Please select at least one floor to display analytics.")
+            selected_floors = all_floors
+        
+        # Filter floor_work_data based on selection
+        filtered_floor_data = {floor: data for floor, data in floor_work_data.items() if floor in selected_floors}
+        
+        st.info(f"📊 Showing analytics for **{len(selected_floors)}** floor(s): {', '.join(selected_floors)}")
+    else:
+        selected_floors = []
+        filtered_floor_data = {}
+    
+    st.markdown("---")
+    
     # Metrics
     col1, col2, col3, col4 = st.columns(4)
     
@@ -969,6 +1013,10 @@ def render_analytics(site_id):
     
     floor_data = get_floor_wise_progress(site_id)
     
+    # Apply floor filter if available
+    if floor_data and selected_floors:
+        floor_data = [f for f in floor_data if f[0] in selected_floors]
+    
     if floor_data:
         df = pd.DataFrame(floor_data, columns=['Floor', 'Updates', 'Avg Progress', 'Work Types'])
         
@@ -1040,6 +1088,252 @@ def render_analytics(site_id):
         display_df = df.copy()
         display_df['Completion Rate'] = ((df['Completed'] / df['Total']) * 100).round(1).astype(str) + '%'
         st.dataframe(display_df, use_container_width=True, hide_index=True)
+    
+    # Floor-wise Work Type Analysis
+    st.markdown("---")
+    st.subheader("🏗️ Floor-wise Work Type Analysis")
+    
+    if filtered_floor_data:
+        # Create tabs for different views
+        view_tab1, view_tab2, view_tab3 = st.tabs(["📊 Progress Heatmap", "📈 Floor Comparison", "📋 Detailed Table"])
+        
+        with view_tab1:
+            st.markdown("**Work Type Progress Across All Floors**")
+            
+            # Create heatmap data - use filtered floors
+            matrix_data = get_work_type_floor_matrix(site_id)
+            
+            if matrix_data:
+                # Filter matrix data based on selected floors
+                filtered_matrix = [item for item in matrix_data if item['Floor'] in selected_floors]
+                
+                if filtered_matrix:
+                    # Convert to pivot table format
+                    df_matrix = pd.DataFrame(filtered_matrix)
+                    pivot_table = df_matrix.pivot(index='Work Type', columns='Floor', values='Progress')
+                    
+                    # Reorder columns based on selected_floors order
+                    available_cols = [col for col in selected_floors if col in pivot_table.columns]
+                    pivot_table = pivot_table[available_cols]
+                    
+                    # Create heatmap
+                    fig = go.Figure(data=go.Heatmap(
+                        z=pivot_table.values,
+                        x=pivot_table.columns,
+                        y=pivot_table.index,
+                        colorscale=[
+                            [0, '#dc3545'],      # Red for 0%
+                            [0.25, '#ffc107'],   # Yellow for 25%
+                            [0.5, '#17a2b8'],    # Cyan for 50%
+                            [0.75, '#20c997'],   # Teal for 75%
+                            [1, '#28a745']       # Green for 100%
+                        ],
+                        text=pivot_table.values,
+                        texttemplate='%{text:.0f}%',
+                        textfont={"size": 10},
+                        colorbar=dict(title="Progress %"),
+                        hoverongaps=False,
+                        hovertemplate='<b>%{y}</b><br>Floor: %{x}<br>Progress: %{z:.1f}%<extra></extra>'
+                    ))
+                    
+                    fig.update_layout(
+                        title=f'Work Type Progress Heatmap ({len(selected_floors)} Floor(s))',
+                        xaxis_title='Floor',
+                        yaxis_title='Work Type',
+                        height=max(400, len(pivot_table.index) * 30),
+                        xaxis={'side': 'top'},
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Legend
+                    st.info("🎨 **Color Legend:** 🔴 0% → 🟡 25% → 🔵 50% → 🟢 75% → ✅ 100%")
+                else:
+                    st.warning("No data available for the selected floors.")
+            else:
+                st.info("No heatmap data available yet.")
+        
+        with view_tab2:
+            st.markdown("**Compare Work Type Progress Across Floors**")
+            
+            # Allow user to select work types to compare - use filtered data
+            all_work_types = set()
+            for floor, work_types in filtered_floor_data.items():
+                all_work_types.update(work_types.keys())
+            
+            selected_work_types = st.multiselect(
+                "Select Work Types to Compare",
+                sorted(all_work_types),
+                default=sorted(all_work_types)[:5] if len(all_work_types) >= 5 else sorted(all_work_types)
+            )
+            
+            if selected_work_types:
+                # Create grouped bar chart - use filtered floors
+                floors = [f for f in selected_floors if f in filtered_floor_data]
+                
+                fig = go.Figure()
+                
+                for work_type in selected_work_types:
+                    progress_values = []
+                    for floor in floors:
+                        if work_type in filtered_floor_data[floor]:
+                            avg_progress = filtered_floor_data[floor][work_type]['total_progress'] / filtered_floor_data[floor][work_type]['count']
+                            progress_values.append(avg_progress)
+                        else:
+                            progress_values.append(0)
+                    
+                    fig.add_trace(go.Bar(
+                        name=work_type,
+                        x=floors,
+                        y=progress_values,
+                        text=[f"{v:.0f}%" for v in progress_values],
+                        textposition='auto',
+                        hovertemplate='<b>%{fullData.name}</b><br>Floor: %{x}<br>Progress: %{y:.1f}%<extra></extra>'
+                    ))
+                
+                fig.update_layout(
+                    title=f'Work Type Progress Comparison ({len(selected_floors)} Floor(s))',
+                    xaxis_title='Floor',
+                    yaxis_title='Average Progress %',
+                    barmode='group',
+                    height=500,
+                    yaxis=dict(range=[0, 100]),
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.3,
+                        xanchor="center",
+                        x=0.5
+                    )
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Floor completion statistics - filtered
+                st.markdown("---")
+                st.markdown("**🏢 Floor Completion Statistics**")
+                
+                floor_stats = get_floor_completion_stats(site_id)
+                
+                if floor_stats:
+                    # Filter stats based on selected floors
+                    filtered_stats = [stat for stat in floor_stats if stat[0] in selected_floors]
+                    
+                    if filtered_stats:
+                        df_stats = pd.DataFrame(filtered_stats, columns=[
+                            'Floor', 'Total Work Types', 'Completed', 'In Progress', 'Not Started', 'Avg Progress %'
+                        ])
+                        
+                        # Create stacked bar chart for completion status
+                        fig_completion = go.Figure()
+                        
+                        fig_completion.add_trace(go.Bar(
+                            name='Completed',
+                            x=df_stats['Floor'],
+                            y=df_stats['Completed'],
+                            marker_color='#28a745',
+                            text=df_stats['Completed'],
+                            textposition='auto'
+                        ))
+                        
+                        fig_completion.add_trace(go.Bar(
+                            name='In Progress',
+                            x=df_stats['Floor'],
+                            y=df_stats['In Progress'],
+                            marker_color='#ffc107',
+                            text=df_stats['In Progress'],
+                            textposition='auto'
+                        ))
+                        
+                        fig_completion.add_trace(go.Bar(
+                            name='Not Started',
+                            x=df_stats['Floor'],
+                            y=df_stats['Not Started'],
+                            marker_color='#dc3545',
+                            text=df_stats['Not Started'],
+                            textposition='auto'
+                        ))
+                        
+                        fig_completion.update_layout(
+                            title=f'Work Type Completion Status ({len(selected_floors)} Floor(s))',
+                            xaxis_title='Floor',
+                            yaxis_title='Number of Work Types',
+                            barmode='stack',
+                            height=400,
+                            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+                        )
+                        
+                        st.plotly_chart(fig_completion, use_container_width=True)
+                    else:
+                        st.info("No completion statistics available for selected floors.")
+            else:
+                st.warning("Please select at least one work type to compare")
+        
+        with view_tab3:
+            st.markdown("**Detailed Floor-wise Work Type Data**")
+            
+            # Create expandable sections for each floor - use filtered data
+            for floor in sorted(filtered_floor_data.keys()):
+                with st.expander(f"**{floor}** - {len(filtered_floor_data[floor])} work type(s)", expanded=False):
+                    
+                    # Calculate floor statistics
+                    floor_work_types = filtered_floor_data[floor]
+                    total_work_types = len(floor_work_types)
+                    avg_floor_progress = sum(wt['total_progress'] / wt['count'] for wt in floor_work_types.values()) / total_work_types if total_work_types > 0 else 0
+                    
+                    # Display metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Work Types", total_work_types)
+                    with col2:
+                        st.metric("Avg Progress", f"{avg_floor_progress:.1f}%")
+                    with col3:
+                        completed = sum(1 for wt in floor_work_types.values() if wt['latest_progress'] >= 100)
+                        st.metric("Completed", f"{completed}/{total_work_types}")
+                    
+                    st.markdown("---")
+                    
+                    # Create detailed table
+                    work_type_rows = []
+                    for work_name, data in sorted(floor_work_types.items()):
+                        avg_progress = data['total_progress'] / data['count']
+                        work_type_rows.append({
+                            'Work Type': work_name,
+                            'Latest Status': data['latest_status'],
+                            'Latest Progress': f"{data['latest_progress']}%",
+                            'Avg Progress': f"{avg_progress:.1f}%",
+                            'Updates': data['count'],
+                            'Last Updated': data['latest_date'][:10] if data['latest_date'] else 'N/A'
+                        })
+                    
+                    df_floor = pd.DataFrame(work_type_rows)
+                    
+                    # Color coding for progress
+                    def highlight_progress(row):
+                        latest_prog = int(row['Latest Progress'].replace('%', ''))
+                        if latest_prog >= 100:
+                            return ['background-color: #d4edda'] * len(row)
+                        elif latest_prog >= 75:
+                            return ['background-color: #d1ecf1'] * len(row)
+                        elif latest_prog >= 50:
+                            return ['background-color: #fff3cd'] * len(row)
+                        elif latest_prog > 0:
+                            return ['background-color: #f8d7da'] * len(row)
+                        else:
+                            return ['background-color: #e2e3e5'] * len(row)
+                    
+                    st.dataframe(
+                        df_floor.style.apply(highlight_progress, axis=1),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    st.caption("🟢 Completed | 🔵 75%+ | 🟡 50-74% | 🔴 25-49% | ⚪ Not Started")
+            
+            if not filtered_floor_data:
+                st.info("No data available for the selected floors.")
+    else:
+        st.info("No floor-wise work type data available yet. Add progress updates with work type details to see this analysis.")
 
 # ===========================
 # MAIN FUNCTION

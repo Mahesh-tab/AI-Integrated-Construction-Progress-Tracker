@@ -48,6 +48,22 @@ def init_db():
         )
     ''')
 
+    # Work Types table - stores structured work type data from form
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS work_types (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            progress_id INTEGER NOT NULL,
+            site_id INTEGER NOT NULL,
+            floor_name TEXT NOT NULL,
+            work_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            progress_percentage INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            FOREIGN KEY (progress_id) REFERENCES progress (id),
+            FOREIGN KEY (site_id) REFERENCES sites (id)
+        )
+    ''')
+
     conn.commit()
     conn.close()
 
@@ -117,13 +133,24 @@ def update_site_status(site_id, status):
     conn.commit()
     conn.close()
 
-def add_progress(site_id, user_id, date, category, description, image, ai_report, ai_verification_status, progress_percentage=0):
+def add_progress(site_id, user_id, date, category, description, image, ai_report, ai_verification_status, progress_percentage=0, work_types_data=None, floor_name=None):
     conn = sqlite3.connect('construction.db')
     c = conn.cursor()
     c.execute("""INSERT INTO progress (site_id, user_id, date, category, description, image, ai_report, 
                  ai_verification_status, progress_percentage) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               (site_id, user_id, date, category, description, image, ai_report, ai_verification_status, progress_percentage))
+    
+    # Get the progress_id of the inserted row
+    progress_id = c.lastrowid
+    
+    # Insert work types data if provided
+    if work_types_data and floor_name:
+        for work_name, details in work_types_data.items():
+            c.execute("""INSERT INTO work_types (progress_id, site_id, floor_name, work_name, status, progress_percentage, date)
+                         VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                      (progress_id, site_id, floor_name, work_name, details['status'], details['progress'], date))
+    
     conn.commit()
     conn.close()
 
@@ -238,117 +265,253 @@ def get_monthly_progress(site_id):
     return monthly
 
 def get_floor_wise_progress(site_id):
-    """Get progress updates grouped by floor"""
+    """Get progress updates grouped by floor from work_types table"""
     conn = sqlite3.connect('construction.db')
     c = conn.cursor()
-    c.execute("""SELECT description FROM progress WHERE site_id = ?""", (site_id,))
-    results = c.fetchall()
-    conn.close()
     
-    # Parse floor information from descriptions
+    # Try to get data from work_types table first (new structured data)
+    c.execute("""
+        SELECT floor_name, work_name, progress_percentage 
+        FROM work_types 
+        WHERE site_id = ?
+        ORDER BY date DESC
+    """, (site_id,))
+    work_results = c.fetchall()
+    
     floor_stats = {}
-    for (description,) in results:
-        if "--- FLOOR-WISE DETAILS ---" in description:
-            parts = description.split("--- FLOOR-WISE DETAILS ---")
-            if len(parts) > 1:
-                floor_section = parts[1]
-                
-                # Extract floor
-                floor_name = "Unknown"
-                if "Floor: " in floor_section:
-                    floor_line = [line for line in floor_section.split('\n') if "Floor: " in line]
-                    if floor_line:
-                        floor_name = floor_line[0].replace("Floor: ", "").strip()
-                
-                # Extract floor progress
-                floor_progress = 0
-                if "Floor Progress: " in floor_section:
-                    prog_line = [line for line in floor_section.split('\n') if "Floor Progress: " in line]
-                    if prog_line:
-                        prog_str = prog_line[0].replace("Floor Progress: ", "").strip().replace("%", "")
-                        try:
-                            floor_progress = int(prog_str)
-                        except:
-                            floor_progress = 0
-                
-                # Extract work phase
-                work_phase = "Unknown"
-                if "Work Phase: " in floor_section:
-                    phase_line = [line for line in floor_section.split('\n') if "Work Phase: " in line]
-                    if phase_line:
-                        work_phase = phase_line[0].replace("Work Phase: ", "").strip()
-                
-                # Aggregate stats
-                if floor_name not in floor_stats:
-                    floor_stats[floor_name] = {
-                        'count': 0,
-                        'total_progress': 0,
-                        'phases': [],
-                        'work_types': []
-                    }
-                
-                floor_stats[floor_name]['count'] += 1
-                floor_stats[floor_name]['total_progress'] += floor_progress
-                floor_stats[floor_name]['phases'].append(work_phase)
-                
-                # Extract work types
-                if "Work Types Being Carried Out:" in floor_section:
-                    work_section = floor_section.split("Work Types Being Carried Out:")[1]
-                    work_lines = [line.strip() for line in work_section.split('\n') if line.strip().startswith('-')]
-                    for line in work_lines:
-                        work_name = line.split(':')[0].replace('-', '').strip()
-                        if work_name not in floor_stats[floor_name]['work_types']:
-                            floor_stats[floor_name]['work_types'].append(work_name)
+    
+    if work_results:
+        # Use structured data from work_types table
+        for floor_name, work_name, progress in work_results:
+            if floor_name not in floor_stats:
+                floor_stats[floor_name] = {
+                    'count': 0,
+                    'total_progress': 0,
+                    'work_types': []
+                }
+            
+            floor_stats[floor_name]['count'] += 1
+            floor_stats[floor_name]['total_progress'] += progress
+            if work_name not in floor_stats[floor_name]['work_types']:
+                floor_stats[floor_name]['work_types'].append(work_name)
+    else:
+        # Fallback to parsing descriptions for old data
+        c.execute("""SELECT description FROM progress WHERE site_id = ?""", (site_id,))
+        results = c.fetchall()
+        
+        for (description,) in results:
+            if "--- FLOOR-WISE DETAILS ---" in description:
+                parts = description.split("--- FLOOR-WISE DETAILS ---")
+                if len(parts) > 1:
+                    floor_section = parts[1]
+                    
+                    # Extract floor
+                    floor_name = "Unknown"
+                    if "Floor: " in floor_section:
+                        floor_line = [line for line in floor_section.split('\n') if "Floor: " in line]
+                        if floor_line:
+                            floor_name = floor_line[0].replace("Floor: ", "").strip()
+                    
+                    # Extract floor progress
+                    floor_progress = 0
+                    if "Floor Progress: " in floor_section:
+                        prog_line = [line for line in floor_section.split('\n') if "Floor Progress: " in line]
+                        if prog_line:
+                            prog_str = prog_line[0].replace("Floor Progress: ", "").strip().replace("%", "")
+                            try:
+                                floor_progress = int(prog_str)
+                            except:
+                                floor_progress = 0
+                    
+                    # Aggregate stats
+                    if floor_name not in floor_stats:
+                        floor_stats[floor_name] = {
+                            'count': 0,
+                            'total_progress': 0,
+                            'work_types': []
+                        }
+                    
+                    floor_stats[floor_name]['count'] += 1
+                    floor_stats[floor_name]['total_progress'] += floor_progress
+                    
+                    # Extract work types
+                    if "Work Types Being Carried Out:" in floor_section:
+                        work_section = floor_section.split("Work Types Being Carried Out:")[1]
+                        work_lines = [line.strip() for line in work_section.split('\n') if line.strip().startswith('-')]
+                        for line in work_lines:
+                            work_name = line.split(':')[0].replace('-', '').strip()
+                            if work_name and work_name not in floor_stats[floor_name]['work_types']:
+                                floor_stats[floor_name]['work_types'].append(work_name)
+    
+    conn.close()
     
     # Calculate averages and format
     result = []
     for floor, stats in floor_stats.items():
         avg_progress = stats['total_progress'] / stats['count'] if stats['count'] > 0 else 0
-        latest_phase = stats['phases'][-1] if stats['phases'] else "Unknown"
         work_types_count = len(stats['work_types'])
-        result.append((floor, stats['count'], avg_progress, latest_phase, work_types_count))
+        result.append((floor, stats['count'], avg_progress, work_types_count))
     
     return result
 
 def get_work_type_breakdown(site_id):
-    """Get breakdown of work types across all floors"""
+    """Get breakdown of work types directly from work_types table"""
     conn = sqlite3.connect('construction.db')
     c = conn.cursor()
-    c.execute("""SELECT description FROM progress WHERE site_id = ?""", (site_id,))
+    
+    # Query the work_types table for structured data
+    c.execute("""
+        SELECT work_name, status, progress_percentage 
+        FROM work_types 
+        WHERE site_id = ?
+        ORDER BY date DESC
+    """, (site_id,))
     results = c.fetchall()
     conn.close()
     
     work_type_stats = {}
     
-    for (description,) in results:
-        if "Work Types Being Carried Out:" in description:
-            parts = description.split("Work Types Being Carried Out:")
-            if len(parts) > 1:
-                work_section = parts[1].split("---")[0] if "---" in parts[1] else parts[1]
-                work_lines = [line.strip() for line in work_section.split('\n') if line.strip().startswith('-')]
-                
-                for line in work_lines:
-                    work_name = line.split(':')[0].replace('-', '').strip()
-                    status = line.split(':')[1].strip() if ':' in line else "Unknown"
-                    
-                    if work_name not in work_type_stats:
-                        work_type_stats[work_name] = {
-                            'total': 0,
-                            'completed': 0,
-                            'in_progress': 0,
-                            'started': 0
-                        }
-                    
-                    work_type_stats[work_name]['total'] += 1
-                    if 'Completed' in status:
-                        work_type_stats[work_name]['completed'] += 1
-                    elif 'progress' in status.lower():
-                        work_type_stats[work_name]['in_progress'] += 1
-                    elif 'Started' in status:
-                        work_type_stats[work_name]['started'] += 1
+    for work_name, status, progress in results:
+        if work_name not in work_type_stats:
+            work_type_stats[work_name] = {
+                'count': 0,
+                'total_progress': 0,
+                'completed': 0,
+                'in_progress': 0,
+                'not_started': 0
+            }
+        
+        work_type_stats[work_name]['count'] += 1
+        work_type_stats[work_name]['total_progress'] += progress
+        
+        # Categorize by progress percentage (more reliable than status text)
+        if progress >= 100:
+            work_type_stats[work_name]['completed'] += 1
+        elif progress == 0 or 'Not Started' in status:
+            work_type_stats[work_name]['not_started'] += 1
+        else:
+            work_type_stats[work_name]['in_progress'] += 1
     
-    return [(name, stats['total'], stats['completed'], stats['in_progress']) 
-            for name, stats in work_type_stats.items()]
+    # Calculate averages and return
+    result = []
+    for name, stats in work_type_stats.items():
+        avg_progress = stats['total_progress'] / stats['count'] if stats['count'] > 0 else 0
+        result.append((name, stats['count'], stats['completed'], stats['in_progress'], avg_progress))
+    
+    return result
+
+def get_floor_wise_work_type_breakdown(site_id):
+    """Get detailed breakdown of work types per floor"""
+    conn = sqlite3.connect('construction.db')
+    c = conn.cursor()
+    
+    # Query work_types table for floor-wise and work-type-wise data
+    c.execute("""
+        SELECT floor_name, work_name, status, progress_percentage, date
+        FROM work_types 
+        WHERE site_id = ?
+        ORDER BY floor_name, work_name, date DESC
+    """, (site_id,))
+    results = c.fetchall()
+    conn.close()
+    
+    # Organize data by floor and work type
+    floor_work_data = {}
+    
+    for floor_name, work_name, status, progress, date in results:
+        if floor_name not in floor_work_data:
+            floor_work_data[floor_name] = {}
+        
+        if work_name not in floor_work_data[floor_name]:
+            floor_work_data[floor_name][work_name] = {
+                'count': 0,
+                'total_progress': 0,
+                'latest_progress': 0,
+                'latest_status': '',
+                'latest_date': ''
+            }
+        
+        floor_work_data[floor_name][work_name]['count'] += 1
+        floor_work_data[floor_name][work_name]['total_progress'] += progress
+        
+        # Keep track of latest entry
+        if not floor_work_data[floor_name][work_name]['latest_date'] or date > floor_work_data[floor_name][work_name]['latest_date']:
+            floor_work_data[floor_name][work_name]['latest_progress'] = progress
+            floor_work_data[floor_name][work_name]['latest_status'] = status
+            floor_work_data[floor_name][work_name]['latest_date'] = date
+    
+    return floor_work_data
+
+def get_work_type_floor_matrix(site_id):
+    """Get matrix of work types vs floors with progress percentages"""
+    conn = sqlite3.connect('construction.db')
+    c = conn.cursor()
+    
+    # Get latest progress for each work type on each floor
+    c.execute("""
+        WITH RankedWorkTypes AS (
+            SELECT 
+                floor_name,
+                work_name,
+                progress_percentage,
+                status,
+                date,
+                ROW_NUMBER() OVER (PARTITION BY floor_name, work_name ORDER BY date DESC) as rn
+            FROM work_types
+            WHERE site_id = ?
+        )
+        SELECT floor_name, work_name, progress_percentage, status
+        FROM RankedWorkTypes
+        WHERE rn = 1
+        ORDER BY floor_name, work_name
+    """, (site_id,))
+    results = c.fetchall()
+    conn.close()
+    
+    # Create matrix structure
+    matrix_data = []
+    for floor_name, work_name, progress, status in results:
+        matrix_data.append({
+            'Floor': floor_name,
+            'Work Type': work_name,
+            'Progress': progress,
+            'Status': status
+        })
+    
+    return matrix_data
+
+def get_floor_completion_stats(site_id):
+    """Get completion statistics for each floor"""
+    conn = sqlite3.connect('construction.db')
+    c = conn.cursor()
+    
+    # Get statistics per floor
+    c.execute("""
+        WITH LatestWorkTypes AS (
+            SELECT 
+                floor_name,
+                work_name,
+                progress_percentage,
+                ROW_NUMBER() OVER (PARTITION BY floor_name, work_name ORDER BY date DESC) as rn
+            FROM work_types
+            WHERE site_id = ?
+        )
+        SELECT 
+            floor_name,
+            COUNT(DISTINCT work_name) as total_work_types,
+            SUM(CASE WHEN progress_percentage >= 100 THEN 1 ELSE 0 END) as completed_count,
+            SUM(CASE WHEN progress_percentage > 0 AND progress_percentage < 100 THEN 1 ELSE 0 END) as in_progress_count,
+            SUM(CASE WHEN progress_percentage = 0 THEN 1 ELSE 0 END) as not_started_count,
+            AVG(progress_percentage) as avg_progress
+        FROM LatestWorkTypes
+        WHERE rn = 1
+        GROUP BY floor_name
+        ORDER BY floor_name
+    """, (site_id,))
+    results = c.fetchall()
+    conn.close()
+    
+    return results
 
 if __name__ == '__main__':
     init_db()
